@@ -5,6 +5,37 @@ const HEADROOM=10;
 const asIso=seconds=>new Date(Number(seconds)*1000).toISOString();
 export const cleanHtml=value=>String(value??'').replace(/<br\s*\/?\s*>/gi,'\n').replace(/<[^>]*>/g,'').replace(/&nbsp;/gi,' ').replace(/&lt;/gi,'<').replace(/&gt;/gi,'>').replace(/&amp;/gi,'&');
 
+export async function reconcileSlack(store,c,fetcher=fetch){
+ const credential=c.credential&&open(store.key,c.credential);if(!credential)throw Error('missing_credential');
+ const now=Date.now(),previous=Date.parse(c.last_sync_at||'');
+ const oldest=now-7*86400000;
+ const since=Number.isFinite(previous)?Math.max(oldest,previous-86400000):oldest;
+ const date=new Date(since).toISOString().slice(0,10);
+ let checkedRooms=0,gapPossible=Number.isFinite(previous)&&previous<oldest;
+ const queries=[`to:me after:${date}`,`"<@${c.external_account_id}>" after:${date}`];
+ for(const query of queries){
+  for(let page=1;page<=5;page++){
+   const url=new URL('https://slack.com/api/search.messages');
+   for(const [key,value] of Object.entries({query,count:'100',page:String(page),sort:'timestamp',sort_dir:'desc'}))url.searchParams.set(key,value);
+   const response=await fetcher(url,{headers:{authorization:`Bearer ${credential}`},signal:AbortSignal.timeout(12000)});
+   if(!response.ok){const error=Error(`provider_http_${response.status}`);error.status=response.status;throw error}
+   const result=await response.json();if(result.ok!==true||!Array.isArray(result.messages?.matches))throw Error(`slack_${String(result.error||'invalid_search_response').slice(0,60)}`);
+   const matches=result.messages.matches;
+   for(const m of matches){
+    const channel=String(m.channel?.id||''),stamp=Number(m.ts),body=String(m.text||'');
+    if(!channel||!Number.isFinite(stamp)||!body||m.user===c.external_account_id)continue;
+    if(m.type!=='im'&&!m.channel?.is_im&&!body.includes(`<@${c.external_account_id}>`))continue;
+    store.ingest(c,{eventKey:`${channel}:${m.ts}`,externalConversationId:channel,recipientRef:channel,displayName:String(m.channel?.name||channel),body,externalMessageId:String(m.ts),senderName:String(m.user||''),sourceAt:asIso(stamp)});
+    checkedRooms++;
+   }
+   const pages=Number(result.messages.paging?.pages||result.messages.pagination?.page_count||1);
+   if(page>=pages)break;
+   if(page===5)gapPossible=true;
+  }
+ }
+ return {checkedRooms,gapPossible};
+}
+
 async function getJson(fetcher,url,headers){
  const response=await fetcher(url,{headers,signal:AbortSignal.timeout(12000)});
  if(response.status===204)return {value:null,remaining:Number(response.headers.get('x-ratelimit-remaining')??Infinity)};
@@ -17,10 +48,11 @@ export async function reconcileChatwork(store,c,fetcher=fetch){
  const headers={'x-chatworktoken':credential};
  const roomsResult=await getJson(fetcher,'https://api.chatwork.com/v2/rooms',headers);
  const rooms=roomsResult.value;if(!Array.isArray(rooms))throw Error('invalid_room_response');
+ const lastChecked=new Map(store.db.prepare('SELECT room_id,updated_at FROM chatwork_rooms WHERE connection_id=? AND user_id=?').all(c.id,c.user_id).map(x=>[x.room_id,x.updated_at]));
+ const ordered=[...rooms].sort((a,b)=>String(lastChecked.get(String(a.room_id))||'').localeCompare(String(lastChecked.get(String(b.room_id))||'')));
  let checkedRooms=0,gapPossible=rooms.length>MAX_ROOMS;
- for(const room of rooms.slice(0,MAX_ROOMS)){
+ for(const room of ordered.slice(0,MAX_ROOMS)){
   if(!Number.isInteger(Number(room.room_id)))continue;
-  store.db.prepare(`INSERT INTO chatwork_rooms(connection_id,user_id,room_id,room_type,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(connection_id,room_id) DO UPDATE SET room_type=excluded.room_type,updated_at=excluded.updated_at`).run(c.id,c.user_id,String(room.room_id),String(room.type||'unknown'),new Date().toISOString());
   const url=`https://api.chatwork.com/v2/rooms/${room.room_id}/messages?force=1`;
   const result=await getJson(fetcher,url,headers);
   if(result.remaining<HEADROOM){gapPossible=true;break}
@@ -32,6 +64,7 @@ export async function reconcileChatwork(store,c,fetcher=fetch){
    if(room.type!=='direct'&&!m.body.includes(`[To:${c.external_account_id}]`))continue;
    store.ingest(c,{eventKey:`${room.room_id}:${m.message_id}`,externalConversationId:String(room.room_id),recipientRef:String(room.room_id),displayName:String(room.name||`Room ${room.room_id}`),body:m.body,externalMessageId:String(m.message_id),senderName:String(m.account?.name||m.account?.account_id||''),sourceAt:asIso(m.send_time)});
   }
+  store.db.prepare(`INSERT INTO chatwork_rooms(connection_id,user_id,room_id,room_type,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(connection_id,room_id) DO UPDATE SET room_type=excluded.room_type,updated_at=excluded.updated_at`).run(c.id,c.user_id,String(room.room_id),String(room.type||'unknown'),new Date().toISOString());
  }
  return {checkedRooms,gapPossible};
 }
@@ -66,10 +99,10 @@ export async function reconcileTeams(store,c,fetcher=fetch){
 }
 
 export async function runReconciliation(store,c,fetcher=fetch){
- if(!['chatwork','teams'].includes(c.provider))throw Error('sync_not_supported');
+ if(!['slack','chatwork','teams'].includes(c.provider))throw Error('sync_not_supported');
  store.beginSync(c);
  try{
-  const result=c.provider==='chatwork'?await reconcileChatwork(store,c,fetcher):await reconcileTeams(store,c,fetcher);
+  const result=c.provider==='slack'?await reconcileSlack(store,c,fetcher):c.provider==='chatwork'?await reconcileChatwork(store,c,fetcher):await reconcileTeams(store,c,fetcher);
   store.finishSync(c,result);return {status:result.gapPossible?'gap_possible':'healthy',...result};
  }catch(e){
   if([401,403].includes(e.status))store.db.prepare("UPDATE connections SET status='reauth_required' WHERE id=? AND user_id=?").run(c.id,c.user_id);

@@ -93,3 +93,26 @@ test('expired Gmail history stays visibly incomplete after a recent rescan',asyn
  assert.equal(config.historyId,'new');
  assert.deepEqual(heartbeats.map(x=>x.gapPossible),[true,true]);
 });
+
+test('initial Gmail sync resumes after a failed message without listing mail again',async()=>{
+ const config={inboxUrl:'https://inbox.example.test',bridgeToken:'bridge',email:'owner@example.test',clientId:'client',refreshToken:'refresh',historyId:''};
+ let lists=0,firstAttempts=0;
+ const fetcher=async(url)=>{
+  if(url==='https://oauth2.googleapis.com/token')return Response.json({access_token:'access',expires_in:3600});
+  if(url.endsWith('/api/bridge/identity'))return Response.json({provider:'gmail',externalAccountId:config.email});
+  if(url.endsWith('/profile'))return Response.json({emailAddress:config.email,historyId:'42'});
+  if(String(url).includes('/messages?')){lists++;return Response.json({messages:[{id:'m2'},{id:'m1'}]})}
+  if(String(url).includes('/messages/m1?')){firstAttempts++;return firstAttempts===1?Response.json({error:{errors:[{reason:'forbidden'}]}},{status:403}):Response.json({...message,id:'m1'})}
+  if(String(url).includes('/messages/m2?'))return Response.json({...message,id:'m2'});
+  if(url.endsWith('/api/bridge/events'))return Response.json({ok:true});
+  if(url.endsWith('/api/bridge/heartbeat'))return Response.json({ok:true});
+  throw Error(`Unexpected URL: ${url}`);
+ };
+ const agent=new GmailAgent(config,()=>{},fetcher);
+ await assert.rejects(agent.sync(),/gmail_http_403/);
+ assert.deepEqual(config.pendingMessageIds,['m1','m2']);
+ assert.deepEqual(await agent.sync(),{gapPossible:false});
+ assert.equal(lists,1);
+ assert.equal(config.historyId,'42');
+ assert.equal(config.pendingMessageIds,undefined);
+});

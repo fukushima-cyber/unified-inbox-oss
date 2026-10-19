@@ -1,6 +1,6 @@
 # Gmail・Messenger連携（検証版）
 
-どちらも受信箱にAPIトークンを入力しない。Gmailは本人端末のエージェントでOAuth認可し、Messengerは本人のブラウザを操作するBotで連携する。現時点の検証は疑似API応答とローカルHTTPまでで、実アカウントによる送受信は未実施。
+どちらも受信箱にAPIトークンを入力しない。Gmailは本人端末のエージェントでOAuth認可し、Messengerは本人のブラウザを操作するBotで連携する。開発環境でGmailの実アカウント認可と受信同期を確認した。Gmailの実送信とMessengerの実連携は未確認。
 
 ## Gmail
 

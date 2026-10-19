@@ -2,13 +2,13 @@
 
 ライセンス: [MIT](LICENSE)。各人が自分のPC・サーバーで動かすためのソースコードです。
 
-個人LINE・Slack・Chatwork・Teams・Gmail・Messengerの会話と返信要求を一画面で扱う検証版。Gmailは本人端末のOAuthエージェント、Messengerは本人のブラウザを操作するBotのブリッジを追加した。ローカルの疑似イベントとGmail API応答を使ったテストは通過したが、Gmail・Messengerの実アカウントでの一往復は未確認。公開配布用の完成版ではない。
+個人LINE・Slack・Chatwork・Teams・Gmail・Messengerの会話と返信要求を一画面で扱う検証版。Gmailは本人端末のOAuthエージェント、Teamsは本人管理のEntraアプリによるOAuth、Messengerは本人のブラウザを操作するBotのブリッジを備える。開発環境でGmailのOAuth・受信、ChatworkのAPI認証・受信を実アカウントで確認した。送信の実アカウント検証とLINE・Messengerの実連携は未完了。公開配布用の完成版ではない。
 
 **作成者が資格情報を預からない配布方法は、利用者それぞれが自分のPC・サーバーでインスタンスを運用すること。** `setup.sh` は新規インスタンスに所有者メールアドレスを設定し、別利用者の追加を拒否する。共通サーバーを作成者が運用すると、既存のSlack・Chatwork・Teamsの資格情報や保存した本文を管理者が復号できる。詳細は [資格情報の保管と配布](docs/credential-custody.md)。
 
 ## 起動
 
-手元のPCで試す場合はNode.js 22.16以降とOpenSSLが必要。依存パッケージのインストールは不要。PCのブラウザで受信箱を使うだけなら公開ドメインは不要。Gmailエージェントも同じPCで動かせる。一方、Slack・Chatwork・TeamsのWebhookとGrok BotのRemote HTTPS MCPを使うには、そのPCの受信箱へ外部から到達できるHTTPS URLが必要。PCを停止・スリープすると受信・返信処理も止まる。
+手元のPCで試す場合はNode.js 22.16以降とOpenSSLが必要。依存パッケージのインストールは不要。Slack・Chatwork・Teamsの定期照合とGmailエージェントには公開ドメインは不要。Webhookの即時通知とGrok BotのRemote HTTPS MCPを使う場合だけ、外部から到達できるHTTPS URLが必要。PCを停止・スリープすると受信・返信処理も止まる。
 
 ```sh
 ./setup.sh you@example.com
@@ -26,18 +26,25 @@
 
 ## 連携の作り方
 
-画面の「連携を追加」で、自分のサービスIDと表示名を登録する。Slack・Chatwork・Teamsは登録時にサービスの `/me` または `auth.test` でトークンの本人IDを照合し、資格情報を本人所有のサーバーにAES-256-GCMで暗号化保存する。LINE・Gmail・MessengerのAPI資格情報は受信箱に入力できない。Gmailは本人端末でOAuth認可し、Messengerは本人のBot環境でブラウザへログインする。
+画面の「連携を追加」で、自分のサービスIDと表示名を登録する。Slack・Chatwork・Teamsの手動登録はサービスの `/me` または `auth.test` でトークンの本人IDを照合し、資格情報を本人所有のサーバーにAES-256-GCMで暗号化保存する。Teamsは画面の「Teamsを接続」からOAuthデバイス認証すると更新トークンも本人のDBに暗号化保存し、自動更新する。LINE・Gmail・MessengerのAPI資格情報は受信箱に入力できない。
 
 | サービス | 自分のID | 送信資格情報 | Webhook秘密値 | 通知URL |
 |---|---|---|---|---|
 | LINE | Botで確認する本人識別子 | 不要 | 不要 | `/mcp` または `/api/bridge/*` |
-| Slack | `auth.test` の `user_id` | 本人のユーザートークン | AppのSigning Secret | `/webhooks/slack/{connectionId}` |
-| Chatwork | `/me` の `account_id` | APIトークン | Webhookトークン（Base64） | `/webhooks/chatwork/{connectionId}` |
-| Teams | Graph `/me` の `id` | 委任アクセストークン | Graph購読の `clientState` | `/webhooks/teams/{connectionId}` |
+| Slack | `auth.test` の `user_id` | 本人のユーザートークン | AppのSigning Secret（Webhook時） | `/webhooks/slack/{connectionId}` |
+| Chatwork | `/me` の `account_id` | APIトークン | Webhookトークン（Webhook時） | `/webhooks/chatwork/{connectionId}` |
+| Teams | Graph `/me` の `id` | 本人OAuth、または委任アクセストークン | Graph購読の `clientState`（Webhook時） | `/webhooks/teams/{connectionId}` |
 | Gmail | 本人のメールアドレス | 本人端末のOAuthエージェントに保存 | 不要 | `/api/bridge/*` |
 | Messenger（ブラウザ） | 本人の識別子 | 不要 | 不要 | `/mcp` または `/api/bridge/*` |
 
-Slackでは Events API の `message.im` やメンション通知を設定し、送信に必要な権限を付ける。現状の接続URLは連携ごとに異なるため、各利用者が別々のSlack Appを設定する前提。共通Appから複数利用者へ通知を振り分けるOAuth構成は未実装。ChatworkはWebhookを設定する。Teamsは `INBOX_PUBLIC_ORIGIN` を設定すると、対象チャットごとの Graph 変更通知購読を定期的に作成・更新する。期限や失敗は連携欄に表示する。各サービスのOAuth認可画面と自動トークン更新は未実装で、画面から資格情報を更新する。Teamsの委任アクセストークンは期限切れで連携が止まるため、現段階で常時運用できない。ChatworkとTeamsは単一プロセスのジョブが順番に履歴を照合し（少数利用者では約5分間隔を目標）、取得上限に達した場合は不足の可能性を表示する。
+### Teamsを本人のアカウントで接続
+
+1. 本人または所属組織が管理する[Microsoft Entraのアプリ登録](https://learn.microsoft.com/ja-jp/entra/identity-platform/quickstart-register-app)を作成する。アカウント種別は所属ディレクトリのみにする。
+2. Microsoft Graphの委任権限 `User.Read`、`Chat.Read`、`ChatMessage.Send` を登録し、認証画面の「パブリック クライアント フローを許可」を有効にする。組織が管理者承認を要求する場合は、その承認が必要。
+3. 受信箱の「連携を追加」でTeamsを選び、下の「Teamsを接続」にアプリIDとディレクトリIDを入力する。表示されたMicrosoft認証ページでコードを入力し、要求権限を確認する。
+4. 受信箱の連携欄が「最終同期」と表示されるまで待つ。OAuth更新トークンは本人のDBに暗号化保存される。公開URLがなければ定期照合で受信する。
+
+Slackは本人のユーザートークンで `search.messages` を使い、DMと本人へのメンションを約5分間隔で照合する。必要なユーザースコープは `search:read` と `chat:write`。検索結果の上限や検索設定により欠落の可能性があるため、接続状態に表示する。Webhookで即時通知する場合は別途 Events API の `message.im`・`app_mention` とSigning Secretが必要。Chatworkは最大40室ずつ巡回し、各室の直近100件を照合する。Teamsもチャット履歴を定期照合する。公開URLを設定した場合だけTeamsのGraph通知購読を作成する。TeamsのOAuthには本人のEntraアプリで `User.Read`、`Chat.Read`、`ChatMessage.Send`、`offline_access` の委任権限とパブリッククライアントフローが必要。組織の管理者承認が必要な場合がある。
 
 GmailとMessengerの設定手順は [Gmail・Messenger連携](docs/gmail-messenger.md) を参照。画面左の「Gmailを使い始める」に本人用の接続手順を表示する。Gmailのエージェントは起動中に約60秒間隔で履歴を照合し、返信要求を処理する。停止中は同期しない。Gmailは初回同期前または15分以上同期が止まった場合、返信要求を登録できない。Messengerのブラウザ操作は、本人のBotでの実動作をまだ検証していない。
 
@@ -66,9 +73,9 @@ LINEには送信元の冪等キーがない。サーバーはリース期限切�
 ## 公開前に残る作業
 
 1. Grok Botの実アカウントでLINEとMessengerの受信箱MCPとの一往復、画面観測の安定ID、返信確認、既読影響を実測する。
-2. Gmailの本人所有Google CloudプロジェクトでOAuth認可・受信・返信・更新トークンの実動作を確認する。Googleのスコープ審査や利用制限を確認する。
-3. Slack・TeamsのOAuthと自動トークン更新を実装し、実アカウントで通知購読と送受信を検証する。Chatworkの資格情報も実アカウントで確認する。
-4. Slackの履歴照合を設計・実装する。Chatworkの直近100件制限とTeamsの取得上限を越えた場合の欠落を運用で検知する。
+2. Gmailの返信を実アカウントで確認する。Googleのスコープ審査や利用制限を確認する。
+3. Slack・Teamsの実アカウント接続と送受信を検証する。Slackのユーザートークン自動更新は未実装。
+4. Slack検索結果、Chatworkの直近100件制限とTeamsの取得上限を越えた場合の欠落を運用で検知する。
 5. 本文保持期間・削除と上限到達時の復旧手順、公開側のレート制限を整える。現状は上限到達で新着受信が停止し、利用者へエラーを表示する。
 6. [本人所有サーバーでの起動手順](docs/deployment.md)を実環境で検証し、復旧テストを行う。
 

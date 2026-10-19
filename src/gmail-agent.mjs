@@ -1,6 +1,7 @@
 const GOOGLE='https://gmail.googleapis.com/gmail/v1/users/me';
 const GOOGLE_PATH=new URL(GOOGLE).pathname;
 const TOKEN='https://oauth2.googleapis.com/token';
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const headersOf=message=>Object.fromEntries((message.payload?.headers||[]).map(h=>[String(h.name).toLowerCase(),String(h.value||'')]));
 const emailOf=value=>{
  const matches=String(value||'').replace(/[\r\n]/g,'').match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z0-9-]+/g)||[];
@@ -55,9 +56,15 @@ export class GmailAgent{
  async google(path,method='GET',payload){
   if(Date.now()>=this.accessUntil)await this.refresh();
   const send=()=>this.fetcher(`${GOOGLE}${path}`,{method,headers:{authorization:`Bearer ${this.accessToken}`,...(payload?{'content-type':'application/json'}:{})},body:payload?JSON.stringify(payload):undefined,signal:AbortSignal.timeout(12000)});
-  let response=await send();if(response.status===401&&method==='GET'){await this.refresh();response=await send()}
-  if(!response.ok){const error=Error(`gmail_http_${response.status}`);error.status=response.status;throw error}
-  return response.json();
+  for(let attempt=0;;attempt++){
+   let response=await send();if(response.status===401&&method==='GET'){await this.refresh();response=await send()}
+   if(response.ok)return response.json();
+   const detail=await response.json().catch(()=>({}));
+   const reason=detail.error?.errors?.[0]?.reason||detail.error?.status||'';
+   const limited=response.status===429||response.status===403&&['rateLimitExceeded','userRateLimitExceeded'].includes(reason);
+   if(method==='GET'&&limited&&attempt<6){await wait(Math.min(32000,1000*2**attempt));continue}
+   const error=Error(`gmail_http_${response.status}${limited?'_rate_limited':''}`);error.status=response.status;throw error;
+  }
  }
  async bridge(path,method='POST',payload){
   const response=await this.fetcher(`${this.config.inboxUrl}/api/bridge/${path}`,{method,headers:{authorization:`Bearer ${this.config.bridgeToken}`,...(payload?{'content-type':'application/json'}:{})},body:payload?JSON.stringify(payload):undefined,signal:AbortSignal.timeout(12000)});
@@ -68,16 +75,23 @@ export class GmailAgent{
  async verifyIdentity(){const x=await this.bridge('identity','GET');if(x.provider!=='gmail'||x.externalAccountId.toLowerCase()!==this.config.email.toLowerCase())throw Error('gmail_bridge_identity_mismatch')}
  async ingest(id){const message=await this.google(`/messages/${encodeURIComponent(id)}?format=full`),event=incomingGmail(message,this.config.email);if(event)await this.bridge('events','POST',event)}
  async initialSync(){
-  const profile=await this.google('/profile');
-  if(profile.emailAddress?.toLowerCase()!==this.config.email.toLowerCase()||!profile.historyId)throw Error('gmail_account_mismatch');
-  const url=new URL(`${GOOGLE}/messages`);url.searchParams.set('q','in:inbox newer_than:7d');url.searchParams.set('maxResults','100');
-  let page='',pages=0,partial=false,ids=[];
-  do{if(page)url.searchParams.set('pageToken',page);const result=await this.google(url.pathname.slice(GOOGLE_PATH.length)+url.search);ids.push(...(result.messages||[]).map(x=>x.id));page=result.nextPageToken||'';pages++}while(page&&pages<5);
-  if(page)partial=true;
-  for(const id of [...new Set(ids)].reverse())await this.ingest(id);
-  if(partial)this.config.gapPossible=true;
-  this.config.historyId=profile.historyId;this.save(this.config);
-  return partial||this.config.gapPossible===true;
+  if(!Array.isArray(this.config.pendingMessageIds)||!this.config.initialHistoryId){
+   const profile=await this.google('/profile');
+   if(profile.emailAddress?.toLowerCase()!==this.config.email.toLowerCase()||!profile.historyId)throw Error('gmail_account_mismatch');
+   const url=new URL(`${GOOGLE}/messages`);url.searchParams.set('q','in:inbox newer_than:7d');url.searchParams.set('maxResults','100');
+   let page='',pages=0,ids=[];
+   do{if(page)url.searchParams.set('pageToken',page);const result=await this.google(url.pathname.slice(GOOGLE_PATH.length)+url.search);ids.push(...(result.messages||[]).map(x=>x.id));page=result.nextPageToken||'';pages++}while(page&&pages<5);
+   if(page)this.config.gapPossible=true;
+   this.config.pendingMessageIds=[...new Set(ids)].reverse();this.config.initialHistoryId=profile.historyId;this.save(this.config);
+  }
+  while(this.config.pendingMessageIds.length){
+   await this.ingest(this.config.pendingMessageIds[0]);
+   this.config.pendingMessageIds.shift();this.save(this.config);
+   if(this.config.pendingMessageIds.length)await wait(350);
+  }
+  this.config.historyId=this.config.initialHistoryId;
+  delete this.config.pendingMessageIds;delete this.config.initialHistoryId;this.save(this.config);
+  return this.config.gapPossible===true;
  }
  async historySync(){
   let page='',pages=0,latest='';

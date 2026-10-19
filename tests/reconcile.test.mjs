@@ -5,5 +5,34 @@ import {Store} from '../src/store.mjs';
 import {runReconciliation} from '../src/reconcile.mjs';
 const response=(data,status=200,headers={})=>new Response(status===204?null:JSON.stringify(data),{status,headers:{'content-type':'application/json',...headers}});
 function setup(provider,account){const s=new Store(':memory:',randomBytes(32));const u=s.createUser('sync@example.test');const id=s.addConnection(u.id,{provider,externalAccountId:account,displayName:provider,credential:'fake-token'}).id;return {s,u,c:s.connection(u.id,id)}}
+test('Slack recovery keeps only direct messages and mentions and deduplicates repeats',async()=>{
+ const {s,u,c}=setup('slack','U_SELF');
+ const fake=async url=>{
+  const query=new URL(String(url)).searchParams.get('query');
+  const direct={ts:'1792400000.000001',type:'im',channel:{id:'D1',name:'Friend'},user:'U_OTHER',text:'hello'};
+  const mention={ts:'1792400001.000002',type:'message',channel:{id:'C1',name:'project'},user:'U_OTHER',text:'<@U_SELF> please check'};
+  const ordinary={ts:'1792400002.000003',type:'message',channel:{id:'C1',name:'project'},user:'U_OTHER',text:'not for me'};
+  return response({ok:true,messages:{matches:query.startsWith('to:me')?[direct,ordinary]:[mention],paging:{pages:1}}});
+ };
+ assert.equal((await runReconciliation(s,c,fake)).status,'healthy');
+ assert.equal(s.inbox(u.id).length,2);
+ await runReconciliation(s,c,fake);
+ assert.equal(s.inbox(u.id).flatMap(x=>x.messages).length,2);
+ s.close();
+});
 test('Chatwork recovery reads direct messages and mentions without duplicates',async()=>{const {s,u,c}=setup('chatwork','42');const calls=[];const fake=async url=>{calls.push(url);if(url.endsWith('/rooms'))return response([{room_id:1,type:'direct',name:'Friend'},{room_id:2,type:'group',name:'Project'}]);if(url.includes('/rooms/1/'))return response([{message_id:'1',account:{account_id:99,name:'Friend'},body:'hello',send_time:1710000000}]);if(url.includes('/rooms/2/'))return response([{message_id:'2',account:{account_id:99,name:'Colleague'},body:'noise',send_time:1710000001},{message_id:'3',account:{account_id:99,name:'Colleague'},body:'[To:42] please check',send_time:1710000002}]);throw Error(url)};const result=await runReconciliation(s,c,fake);assert.equal(result.status,'healthy');assert.equal(result.checkedRooms,2);assert.equal(s.inbox(u.id).length,2);assert.equal(s.inbox(u.id).flatMap(x=>x.messages).length,2);await runReconciliation(s,c,fake);assert.equal(s.inbox(u.id).flatMap(x=>x.messages).length,2);assert.ok(s.connections(u.id)[0].last_sync_at);s.close()});
+test('Chatwork recovery rotates through rooms beyond the per-run limit',async()=>{
+ const {s,c}=setup('chatwork','42'),visited=[];
+ const rooms=Array.from({length:45},(_,i)=>({room_id:i+1,type:'direct',name:`Room ${i+1}`}));
+ const fake=async url=>{
+  if(url.endsWith('/rooms'))return response(rooms);
+  const id=Number(/\/rooms\/(\d+)\/messages/.exec(url)?.[1]);
+  if(id){visited.push(id);return response([])}
+  throw Error(url);
+ };
+ assert.equal((await runReconciliation(s,c,fake)).checkedRooms,40);
+ assert.equal((await runReconciliation(s,c,fake)).checkedRooms,40);
+ assert.equal(new Set(visited).size,45);
+ s.close();
+});
 test('Teams recovery strips markup and marks token failure',async()=>{const {s,u,c}=setup('teams','self');const fake=async url=>{if(url.includes('/me/chats'))return response({value:[{id:'chat-1',chatType:'oneOnOne',topic:'Project'}]});if(url.includes('/chats/chat-1/messages'))return response({value:[{id:'m1',from:{user:{id:'other',displayName:'Other'}},body:{content:'Hi <b>team</b>&amp; all'},createdDateTime:'2026-10-18T00:00:00Z'},{id:'m2',from:{user:{id:'self'}},body:{content:'mine'},createdDateTime:'2026-10-18T00:00:01Z'}]});throw Error(url)};const result=await runReconciliation(s,c,fake);assert.equal(result.status,'healthy');assert.equal(s.inbox(u.id)[0].messages[0].body,'Hi team& all');assert.equal(s.inbox(u.id)[0].messages.length,1);const denied=await runReconciliation(s,c,async()=>response({error:'invalid'},401));assert.equal(denied.status,'failed');assert.equal(s.connection(u.id,c.id).status,'reauth_required');assert.equal(s.connections(u.id)[0].sync_status,'failed');s.close()});

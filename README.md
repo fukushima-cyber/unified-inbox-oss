@@ -4,6 +4,8 @@
 
 個人LINE・Slack・Chatwork・Teams・Gmail・Messengerの会話と返信要求を一画面で扱う検証版。Gmailは本人端末のOAuthエージェント、Teamsは本人管理のEntraアプリによるOAuth、Messengerは本人のブラウザを操作するBotのブリッジを備える。開発環境でGmailのOAuth・受信、ChatworkのAPI認証・受信を実アカウントで確認した。送信の実アカウント検証とLINE・Messengerの実連携は未完了。公開配布用の完成版ではない。
 
+![サンプルデータで表示した統合受信箱](docs/ui-preview.jpg)
+
 **作成者が資格情報を預からない配布方法は、利用者それぞれが自分のPC・サーバーでインスタンスを運用すること。** `setup.sh` は新規インスタンスに所有者メールアドレスを設定し、別利用者の追加を拒否する。共通サーバーを作成者が運用すると、既存のSlack・Chatwork・Teamsの資格情報や保存した本文を管理者が復号できる。詳細は [資格情報の保管と配布](docs/credential-custody.md)。
 
 ## 起動
@@ -25,6 +27,8 @@
 環境変数: `INBOX_DB`（DBパス）、`PORT`（既定8787）、`INBOX_HOST`（既定127.0.0.1）、`INBOX_PUBLIC_ORIGIN`（公開HTTPSのオリジン。Teams通知購読のURLとMCPのOrigin検証に使用）、`INBOX_MAX_MESSAGES_PER_USER`（既定10000）、`INBOX_MAX_EVENTS_PER_USER`（既定20000）、`INBOX_MAX_COMMANDS_PER_USER`（既定10000）。ローカルサーバーはTLSを持たない。外部公開ではHTTPSリバースプロキシが必須で、`INBOX_HOST` をループバック以外にするにはHTTPSの `INBOX_PUBLIC_ORIGIN` が必要。Cookieは公開HTTPS時にSecure属性を付ける。
 
 ## 連携の作り方
+
+画面は「要対応 → 会話確認 → 返信先と本文の確認 → 送信結果の確認」の順で使う。状態別件数、サービス別絞り込み、相手・件名・宛先の検索、スマホ幅の一覧／詳細切替を備える。連携設定は左メニュー下部にまとめた。操作と状態表示の詳細は [受信箱の操作設計](docs/ui-ux.md) を参照。
 
 画面の「連携を追加」で、自分のサービスIDと表示名を登録する。Slack・Chatwork・Teamsの手動登録はサービスの `/me` または `auth.test` でトークンの本人IDを照合し、資格情報を本人所有のサーバーにAES-256-GCMで暗号化保存する。Teamsは画面の「Teamsを接続」からOAuthデバイス認証すると更新トークンも本人のDBに暗号化保存し、自動更新する。LINE・Gmail・MessengerのAPI資格情報は受信箱に入力できない。
 

@@ -1,0 +1,7 @@
+{$INBOX_DOMAIN} {
+  reverse_proxy app:8787
+  header {
+    Referrer-Policy "no-referrer"
+    X-Content-Type-Options "nosniff"
+  }
+}

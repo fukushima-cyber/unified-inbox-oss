@@ -1,0 +1,112 @@
+erDiagram
+    USERS ||--o{ CONNECTIONS : owns
+    CONNECTIONS ||--o{ CONVERSATIONS : contains
+    CONVERSATIONS ||--o{ MESSAGES : contains
+    CONNECTIONS ||--o{ INBOUND_EVENTS : deduplicates
+    CONVERSATIONS ||--o{ COMMANDS : targets
+    COMMANDS ||--o{ ATTEMPTS : records
+    USERS ||--o{ AUDIT : records
+    CONNECTIONS ||--o| SYNC_STATE : reconciles
+    CONNECTIONS ||--o{ CHATWORK_ROOMS : classifies
+    CONNECTIONS ||--o{ TEAMS_SUBSCRIPTIONS : renews
+
+    USERS {
+        text id PK
+        text email UK
+        text token_hash UK
+    }
+    CONNECTIONS {
+        text id PK
+        text user_id FK
+        text provider
+        text external_account_id
+        text status
+        text credential
+        text webhook_secret
+        text bridge_hash
+        text last_sync_at
+        text last_event_at
+        text subscription_status
+        text subscription_checked_at
+    }
+    CONVERSATIONS {
+        text id PK
+        text user_id FK
+        text connection_id FK
+        text external_key
+        text recipient_ref
+        text display_name
+        int attention
+        text last_message_at
+    }
+    MESSAGES {
+        text id PK
+        text user_id FK
+        text conversation_id FK
+        text external_id
+        text sender_name
+        text direction
+        text body
+        text source_at
+    }
+    INBOUND_EVENTS {
+        text id PK
+        text user_id FK
+        text connection_id FK
+        text event_key UK
+        text received_at
+    }
+    COMMANDS {
+        text id PK
+        text user_id FK
+        text conversation_id FK
+        text connection_id FK
+        text request_id UK
+        text recipient_snapshot
+        text body
+        text body_hash
+        text status
+        text lease_until
+        text error_code
+    }
+    ATTEMPTS {
+        text id PK
+        text user_id FK
+        text command_id FK
+        text outcome
+        text evidence
+        text started_at
+        text finished_at
+    }
+    AUDIT {
+        text id PK
+        text user_id FK
+        text actor
+        text entity_id
+        text action
+        text at
+    }
+    SYNC_STATE {
+        text connection_id PK,FK
+        text user_id FK
+        text status
+        text last_started_at
+        text last_completed_at
+        int gap_possible
+        int checked_rooms
+    }
+    CHATWORK_ROOMS {
+        text connection_id PK,FK
+        text room_id PK
+        text user_id FK
+        text room_type
+        text updated_at
+    }
+    TEAMS_SUBSCRIPTIONS {
+        text connection_id PK,FK
+        text chat_id PK
+        text user_id FK
+        text subscription_id UK
+        text expires_at
+        text room_type
+    }

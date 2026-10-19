@@ -1,0 +1,10 @@
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.env
+node_modules/
+.DS_Store
+*.log
+secrets/
+backups/
+*.bak

@@ -1,0 +1,13 @@
+.git
+.github
+.env
+secrets
+backups
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.log
+.DS_Store
+docs
+tests
+node_modules

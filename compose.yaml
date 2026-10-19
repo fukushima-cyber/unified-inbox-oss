@@ -1,0 +1,51 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      NODE_ENV: production
+      INBOX_HOST: 0.0.0.0
+      PORT: "8787"
+      INBOX_DB: /data/inbox.sqlite
+      INBOX_MASTER_KEY_FILE: /run/secrets/inbox_master_key
+      INBOX_PUBLIC_ORIGIN: https://${INBOX_DOMAIN:?Set INBOX_DOMAIN in .env}
+      INBOX_OWNER_EMAIL: ${INBOX_OWNER_EMAIL:-}
+    secrets:
+      - inbox_master_key
+    volumes:
+      - inbox_data:/data
+      - inbox_backups:/backups
+    expose:
+      - "8787"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      INBOX_DOMAIN: ${INBOX_DOMAIN:?Set INBOX_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+secrets:
+  inbox_master_key:
+    file: ./secrets/inbox_master_key
+volumes:
+  inbox_data:
+  inbox_backups:
+  caddy_data:
+  caddy_config:

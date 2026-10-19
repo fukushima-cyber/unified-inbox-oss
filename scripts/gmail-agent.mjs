@@ -52,7 +52,7 @@ async function authorize(client){
  const body=new URLSearchParams({client_id:client.client_id,code,code_verifier:verifier,redirect_uri:redirect,grant_type:'authorization_code'});
  if(client.client_secret)body.set('client_secret',client.client_secret);
  const response=await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body,signal:AbortSignal.timeout(12000)});
- const result=await response.json().catch(()=>({}));if(!response.ok||!result.refresh_token||!result.access_token)throw Error('Googleの更新トークンを取得できませんでした');
+ const result=await response.json().catch(()=>({}));if(!response.ok||!result.refresh_token||!result.access_token){const detail=String(result.error_description||'').replace(/[A-Za-z0-9_-]{20,}/g,'[redacted]').slice(0,160);throw Error(`Googleの更新トークンを取得できませんでした (HTTP ${response.status}, ${String(result.error||'missing_tokens').slice(0,80)}${detail?`: ${detail}`:''})`)}
  const granted=new Set(String(result.scope||'').split(' '));if(!granted.has('https://www.googleapis.com/auth/gmail.readonly')||!granted.has('https://www.googleapis.com/auth/gmail.send'))throw Error('Gmailの読み取りと送信の両方を許可してください');
  const profileResponse=await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile',{headers:{authorization:`Bearer ${result.access_token}`},signal:AbortSignal.timeout(12000)});
  if(!profileResponse.ok)throw Error('Gmailプロフィールを取得できません');

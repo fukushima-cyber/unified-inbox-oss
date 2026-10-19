@@ -37,7 +37,7 @@ async function authorize(client){
  const auth=new URL('https://accounts.google.com/o/oauth2/v2/auth');
  for(const [k,v] of Object.entries({client_id:client.client_id,redirect_uri:redirect,response_type:'code',scope:'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send',access_type:'offline',prompt:'consent',state,code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256'}))auth.searchParams.set(k,v);
  const codePromise=new Promise((resolve,reject)=>{
-  const timer=setTimeout(()=>reject(Error('Google認可が時間切れです')),180000);
+  const timer=setTimeout(()=>reject(Error('Google認可が時間切れです')),600000);
   server.on('request',(req,res)=>{
    const url=new URL(req.url,redirect);
    if(req.method!=='GET'||url.pathname!=='/'||req.headers.host!==`127.0.0.1:${server.address().port}`){res.writeHead(404);return res.end()}

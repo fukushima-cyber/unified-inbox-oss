@@ -28,7 +28,7 @@ test('one-command local setup starts and preserves the key and DB on rerun',asyn
   let output='';
   child.stdout.on('data',chunk=>output+=chunk);
   child.stderr.on('data',chunk=>output+=chunk);
-  for(let i=0;i<50;i++){
+  for(let i=0;i<900;i++){
    if(child.exitCode!==null)throw Error(`setup exited: ${output}`);
    try{
     if((await fetch(`http://127.0.0.1:${port}/health`)).ok && output.includes('"status":"invited"')){

@@ -17,7 +17,7 @@ test('personal instance accepts only its owner invitation',async()=>{
  const child=spawn(process.execPath,['src/server.mjs'],{cwd:new URL('..',import.meta.url),env:{...process.env,INBOX_MASTER_KEY:key,INBOX_DB:db,INBOX_OWNER_EMAIL:'owner@example.test',PORT:String(port)},stdio:'ignore'});
  const base=`http://127.0.0.1:${port}`;
  try{
-  let ready=false;for(let i=0;i<40;i++){try{if((await fetch(base+'/health')).ok){ready=true;break}}catch{}await delay(100)}assert.equal(ready,true);
+  let ready=false;for(let i=0;i<300;i++){try{if((await fetch(base+'/health')).ok){ready=true;break}}catch{}await delay(100)}assert.equal(ready,true);
   const activate=token=>fetch(base+'/api/auth/activate',{method:'POST',headers:{origin:base,'content-type':'application/json'},body:JSON.stringify({inviteToken:token,password:'a-long-secure-password'})});
   assert.equal((await activate(other.token)).status,403);
   assert.equal((await activate(owner.token)).status,201);

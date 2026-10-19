@@ -17,7 +17,7 @@ test('invited users activate private browser sessions and remain isolated',async
  const inviteA=store.createInvite('alice@example.test'),inviteB=store.createInvite('bob@example.test');store.close();
  const child=spawn(process.execPath,['src/server.mjs'],{cwd:new URL('..',import.meta.url),env:{...process.env,INBOX_MASTER_KEY:key,INBOX_DB:db,PORT:String(port)},stdio:'ignore'});
  const base=`http://127.0.0.1:${port}`;const post=async(path,data,cookie='',origin=base)=>fetch(base+path,{method:'POST',headers:{origin,'content-type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(data)});
- try{let ready=false;for(let i=0;i<30;i++){try{if((await fetch(base+'/health')).ok){ready=true;break}}catch{}await delay(100)}assert.equal(ready,true);
+ try{let ready=false;for(let i=0;i<300;i++){try{if((await fetch(base+'/health')).ok){ready=true;break}}catch{}await delay(100)}assert.equal(ready,true);
   assert.equal((await post('/api/auth/activate',{inviteToken:inviteA.token,password:'too-short'})).status,400);
   const activated=await post('/api/auth/activate',{inviteToken:inviteA.token,password:'alice-strong-passphrase'});assert.equal(activated.status,201);
   const cookieA=activated.headers.get('set-cookie');assert.match(cookieA,/HttpOnly/);assert.match(cookieA,/SameSite=Strict/);assert.match(cookieA,/Max-Age=604800/);

@@ -68,7 +68,7 @@ async function connect(clientFile){
  const {refreshToken,profile}=await authorize(client);
  if(profile.emailAddress?.toLowerCase()!==account.externalAccountId.toLowerCase())throw Error('Gmailアカウントと受信箱の登録IDが一致しません');
  save({inboxUrl:url,bridgeToken:token,email:profile.emailAddress.toLowerCase(),clientId:client.client_id,clientSecret:client.client_secret||'',refreshToken,historyId:'',gapPossible:false});
- console.log('認可情報を本人の端末に保存しました。node scripts/gmail-agent.mjs run で同期を開始してください。');
+ console.log('認可情報を本人の端末に保存しました。./setup.sh で受信箱を起動している場合はGmail同期が自動で始まります。');
 }
 async function run(){
  const config=readConfig(),agent=new GmailAgent(config,save);

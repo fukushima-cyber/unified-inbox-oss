@@ -141,7 +141,7 @@ async function handle(req,res){const url=new URL(req.url,`http://${req.headers.h
  if(req.method==='POST'&&p==='/api/replies'){const {data}=await body(req);required(data,'conversationId','requestId','expectedRecipientRef','body');if(data.body.length>20000)throw Error('body_too_large');return json(res,202,store.command(user.id,data))}
  return fail(res,404,'not_found')
 }
-const clientErrors=new Set(['recipient_changed','recipient_conflict','idempotency_conflict','connection_inactive','conversation_not_found','pending_command','body_too_large','credential_verification_failed','account_identity_mismatch','slack_user_token_required','bridge_credentials_not_accepted']);
+const clientErrors=new Set(['recipient_changed','recipient_conflict','idempotency_conflict','connection_inactive','conversation_not_found','pending_command','gmail_agent_offline','body_too_large','credential_verification_failed','account_identity_mismatch','slack_user_token_required','bridge_credentials_not_accepted']);
 const server=http.createServer((req,res)=>handle(req,res).catch(e=>{
  console.error('request',e.message);
  const code=String(e.message),clientError=code.startsWith('invalid_')||clientErrors.has(code);

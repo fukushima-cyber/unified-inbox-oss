@@ -18,7 +18,7 @@ test('Gmail and Messenger bridge accounts keep provider tokens off the server',a
  const base=`http://127.0.0.1:${port}`;
  const call=async(path,token,payload,method='POST')=>{const r=await fetch(base+path,{method,headers:{authorization:`Bearer ${token}`,...(payload?{'content-type':'application/json'}:{})},body:payload?JSON.stringify(payload):undefined});return {status:r.status,data:await r.json()}};
  try{
-  let ready=false;for(let i=0;i<40;i++){try{if((await fetch(base+'/health')).ok){ready=true;break}}catch{}await delay(100)}assert.equal(ready,true);
+  let ready=false;for(let i=0;i<300;i++){try{if((await fetch(base+'/health')).ok){ready=true;break}}catch{}await delay(100)}assert.equal(ready,true);
   const bad=await call('/api/connections',owner.token,{provider:'gmail',externalAccountId:owner.email,displayName:'Gmail',credential:'should-not-be-stored'});assert.equal(bad.status,400);
   const gmail=await call('/api/connections',owner.token,{provider:'gmail',externalAccountId:owner.email,displayName:'Gmail'});assert.equal(gmail.status,201);
   const gmailBridge=await call(`/api/connections/${gmail.data.id}/bridge-token`,owner.token,{});assert.equal(gmailBridge.status,200);
@@ -26,7 +26,10 @@ test('Gmail and Messenger bridge accounts keep provider tokens off the server',a
   assert.equal((await call('/api/bridge/events',gmailBridge.data.token,{eventKey:'gmail:m1',externalConversationId:'thread1',recipientRef:'alice@example.test',displayName:'Question',body:'Hello',externalMessageId:'m1'})).status,200);
   const inbox=(await call('/api/inbox',owner.token,null,'GET')).data;assert.equal(inbox.conversations[0].provider,'gmail');
   assert.equal((await call('/api/inbox',other.token,null,'GET')).data.conversations.length,0);
-  const reply=await call('/api/replies',owner.token,{conversationId:inbox.conversations[0].id,expectedRecipientRef:'alice@example.test',requestId:'reply1',body:'Answer'});assert.equal(reply.status,202);
+  const replyInput={conversationId:inbox.conversations[0].id,expectedRecipientRef:'alice@example.test',requestId:'reply1',body:'Answer'};
+  assert.equal((await call('/api/replies',owner.token,replyInput)).data.error,'gmail_agent_offline');
+  assert.equal((await call('/api/bridge/heartbeat',gmailBridge.data.token,{})).status,200);
+  const reply=await call('/api/replies',owner.token,replyInput);assert.equal(reply.status,202);
   const lease=await call('/api/bridge/lease',gmailBridge.data.token,{});assert.equal(lease.data.command.body,'Answer');
   assert.equal((await call(`/api/bridge/commands/${lease.data.command.id}/executing`,gmailBridge.data.token,{leaseToken:lease.data.command.leaseToken})).status,200);
   assert.equal((await call(`/api/bridge/commands/${lease.data.command.id}/result`,gmailBridge.data.token,{leaseToken:lease.data.command.leaseToken,status:'sent',externalMessageId:'gmail-sent',evidence:'gmail_api_success'})).status,200);

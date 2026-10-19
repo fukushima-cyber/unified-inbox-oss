@@ -132,6 +132,6 @@ else
  PORT=$port node -e 'const net=require("node:net");const s=net.createServer();s.once("error",()=>process.exit(1));s.listen(Number(process.env.PORT),"127.0.0.1",()=>s.close())' || fail "ポート $port を使用できません"
  printf 'URL: http://127.0.0.1:%s\n' "$port"
  node scripts/setup-invite.mjs "$email"
- printf '%s\n' 'サーバーを起動します。終了するには Ctrl+C。'
- exec node src/server.mjs
+ printf '%s\n' '受信箱を起動します。Gmail設定があれば同期も自動起動します。終了するには Ctrl+C。'
+ exec node scripts/local-run.mjs
 fi

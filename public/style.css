@@ -5,3 +5,4 @@
 #loginDialog{max-height:calc(100vh - 2rem);overflow-y:auto}#loginForm[hidden],#loginIntro[hidden],#logout[hidden]{display:none}
 
 [hidden]{display:none!important}
+.setupGuide{background:#fff;border:1px solid #dce5e1;border-radius:10px;padding:12px;margin:18px 0;font-size:12px;line-height:1.55}.setupGuide h2{margin:0 0 8px;font-size:13px;letter-spacing:0;text-transform:none;color:#193f37}.setupGuide ol{padding-left:19px;margin:8px 0}.setupGuide li{margin:6px 0}.setupGuide a{color:#126456}.setupGuide code{display:block;overflow-wrap:anywhere;background:#eef4f1;border-radius:5px;padding:8px;font-size:11px}.setupGuide p{margin:9px 0 0;color:#53615d}

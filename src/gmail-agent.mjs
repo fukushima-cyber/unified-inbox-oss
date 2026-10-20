@@ -31,7 +31,7 @@ export function incomingGmail(message,ownEmail){
  if(!sender||!recipient)throw Error('gmail_recipient_ambiguous');
  if(sender===ownEmail.toLowerCase())return null;
  const date=Number(message.internalDate);
- return {eventKey:`gmail:${message.id}`,externalConversationId:message.threadId,recipientRef:recipient,displayName:safeHeader(headers.subject||sender).slice(0,200)||sender,body:messageBody(message),externalMessageId:message.id,senderName:safeHeader(headers.from).slice(0,200),sourceAt:Number.isFinite(date)&&date>0?new Date(date).toISOString():new Date().toISOString()};
+ return {eventKey:`gmail:${message.id}`,externalConversationId:message.threadId,recipientRef:recipient,displayName:safeHeader(headers.subject||'（件名なし）').slice(0,200)||'（件名なし）',body:messageBody(message),externalMessageId:message.id,senderName:safeHeader(headers.from).slice(0,200),sourceAt:Number.isFinite(date)&&date>0?new Date(date).toISOString():new Date().toISOString()};
 }
 export function replyMime({from,to,subject,messageId,references,body,attachments=[]}){
  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from)||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to))throw Error('invalid_email_address');

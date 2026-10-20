@@ -9,7 +9,10 @@ test('Gmail parsing fixes the sender and thread and safely builds a reply',()=>{
  assert.equal(event.eventKey,'gmail:m1');
  assert.equal(event.externalConversationId,'t1');
  assert.equal(event.recipientRef,'alice@example.test');
+ assert.equal(event.displayName,'Question');
+ assert.equal(event.senderName,'Alice <alice@example.test>');
  assert.equal(event.body,'Hello from Gmail');
+ assert.equal(incomingGmail({...message,payload:{...message.payload,headers:message.payload.headers.filter(x=>x.name!=='Subject')}},'owner@example.test').displayName,'（件名なし）');
  assert.throws(()=>incomingGmail({...message,payload:{...message.payload,headers:[...message.payload.headers.filter(x=>x.name!=='Reply-To'),{name:'Reply-To',value:'a@example.test, b@example.test'}]}},'owner@example.test'),/gmail_recipient_ambiguous/);
  const raw=Buffer.from(replyMime({from:'owner@example.test',to:event.recipientRef,subject:'Question',messageId:'<m1@example.test>',body:'返信です'}),'base64url').toString('utf8');
  assert.match(raw,/To: alice@example\.test\r\n/);

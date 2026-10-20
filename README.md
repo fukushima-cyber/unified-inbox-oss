@@ -55,7 +55,7 @@ GmailとMessengerの設定手順は [Gmail・Messenger連携](docs/gmail-messeng
 
 ## Grok Bot と個人LINE
 
-LINE連携を追加した本人が「ブリッジ鍵を発行」し、その鍵を本人専用のGrok BotのRemote HTTPS MCPに設定する。MCP URLは `https://{公開ホスト}/mcp`。鍵はHTTP Bearerとして渡す。MCPは `record_line_message`、`claim_reply`、`mark_reply_started`、`report_reply_result` の4ツールを提供する。一時HTTPS MCPではGrok BotからBearer認証付きのツール呼び出しを実測済み。実際の受信箱MCPとの接続は未検証。鍵の再発行は旧鍵を失効させる。
+LINE連携を追加した本人が「ブリッジ鍵を発行」し、その鍵を本人専用のGrok BotのRemote HTTPS MCPに設定する。MCP URLは `https://{公開ホスト}/mcp`。鍵はHTTP Bearerとして渡す。ローカル専用モードで試す場合は [MCP専用ゲートウェイ](docs/grok-bot-gateway.md) を使い、受信箱の画面や他のAPIを公開しない。MCPは `record_line_message`、`claim_reply`、`mark_reply_started`、`report_reply_result` の4ツールを提供する。一時HTTPS MCPではGrok BotからBearer認証付きのツール呼び出しを実測済み。実際の受信箱MCPとの接続は未検証。鍵の再発行は旧鍵を失効させる。
 
 Botの手順は次のとおり。
 

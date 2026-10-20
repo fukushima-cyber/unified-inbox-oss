@@ -33,8 +33,9 @@ const jsonInput=req=>String(req.headers['content-type']||'').split(';')[0].trim(
 const json=(res,status,body)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(body))};
 const fail=(res,status,error)=>json(res,status,{error});
 const bearer=req=>(req.headers.authorization||'').replace(/^Bearer /,'');
-async function body(req){let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>1_000_000)throw Error('body_too_large')}return {raw,data:raw?JSON.parse(raw):{}}}
+async function body(req,limit=1_000_000){const chunks=[];let bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>limit)throw Error('body_too_large');chunks.push(chunk)}const raw=Buffer.concat(chunks).toString('utf8');return {raw,data:raw?JSON.parse(raw):{}}}
 const required=(x,...names)=>{for(const n of names)if(typeof x[n]!=='string'||!x[n].trim())throw Error('invalid_'+n)};
+const notDelivered=code=>Object.assign(Error(code),{notDelivered:true});
 function incoming(c,x){required(x,'eventKey','externalConversationId','recipientRef','displayName','body');if(x.body.length>20000)throw Error('body_too_large');return store.ingest(c,x)}
 async function verifyConnection(x){
  if(['line','gmail','messenger'].includes(x.provider)){
@@ -52,7 +53,20 @@ async function verifyConnection(x){
  if(String(id)!==x.externalAccountId)throw Error('account_identity_mismatch');
  if(x.provider==='slack'&&me.bot_id)throw Error('slack_user_token_required');
 }
-async function providerSend(c,v,text){const credential=c.credential&&open(key,c.credential);if(!credential)throw Error('missing_credential');let url,init;
+async function providerSend(c,v,text,files=[]){const credential=c.credential&&open(key,c.credential);if(!credential)throw Error('missing_credential');let url,init;
+ if(files.length&&c.provider==='chatwork'){
+  if(!/^\d+$/.test(v.recipient_ref))throw Error('invalid_recipient');
+  const file=files[0],form=new FormData();form.set('file',new Blob([Buffer.from(file.data,'base64')],{type:file.type}),file.name);form.set('message',text);
+  const response=await fetch(`https://api.chatwork.com/v2/rooms/${v.recipient_ref}/files`,{method:'POST',headers:{'x-chatworktoken':credential},body:form,signal:AbortSignal.timeout(120000)});
+  const payload=await response.json().catch(()=>({}));if(!response.ok||!payload.file_id)throw (response.status>=400&&response.status<500?notDelivered:Error)(`provider_${response.status}_${payload.error||'file_upload_unconfirmed'}`);return `file:${payload.file_id}`;
+ }
+ if(files.length&&c.provider==='slack'){
+  const uploaded=[];
+  for(const file of files){const params=new URLSearchParams({filename:file.name,length:String(file.size)});const start=await fetch('https://slack.com/api/files.getUploadURLExternal',{method:'POST',headers:{authorization:`Bearer ${credential}`,'content-type':'application/x-www-form-urlencoded'},body:params,signal:AbortSignal.timeout(15000)});const result=await start.json().catch(()=>({}));if(!start.ok||!result.ok||!result.file_id||!result.upload_url)throw notDelivered(`slack_upload_start_${result.error||start.status}`);
+   const target=new URL(result.upload_url);if(target.protocol!=='https:'||!['files.slack.com','files-origin.slack.com'].includes(target.hostname))throw notDelivered('slack_upload_url_invalid');
+   const upload=await fetch(target,{method:'POST',headers:{'content-type':'application/octet-stream'},body:Buffer.from(file.data,'base64'),redirect:'error',signal:AbortSignal.timeout(120000)});if(!upload.ok)throw notDelivered(`slack_upload_${upload.status}`);uploaded.push({id:result.file_id,title:file.name})}
+  const form=new URLSearchParams({files:JSON.stringify(uploaded),channel_id:v.recipient_ref,initial_comment:text});const response=await fetch('https://slack.com/api/files.completeUploadExternal',{method:'POST',headers:{authorization:`Bearer ${credential}`,'content-type':'application/x-www-form-urlencoded'},body:form,signal:AbortSignal.timeout(30000)});const result=await response.json().catch(()=>({}));if(!response.ok||!result.ok)throw (['missing_scope','not_in_channel','channel_not_found'].includes(result.error)?notDelivered:Error)(`slack_upload_complete_${result.error||response.status}`);return `file:${uploaded[0].id}`;
+ }
  if(c.provider==='slack'){url='https://slack.com/api/chat.postMessage';init={method:'POST',headers:{authorization:`Bearer ${credential}`,'content-type':'application/json'},body:JSON.stringify({channel:v.recipient_ref,text})}}
  else if(c.provider==='chatwork'){if(!/^\d+$/.test(v.recipient_ref))throw Error('invalid_recipient');url=`https://api.chatwork.com/v2/rooms/${v.recipient_ref}/messages`;init={method:'POST',headers:{'x-chatworktoken':credential,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({body:text})}}
  else if(c.provider==='teams'){url=`https://graph.microsoft.com/v1.0/chats/${encodeURIComponent(v.recipient_ref)}/messages`;init={method:'POST',headers:{authorization:`Bearer ${credential}`,'content-type':'application/json'},body:JSON.stringify({body:{contentType:'text',content:text}})}}
@@ -65,10 +79,10 @@ async function providerSend(c,v,text){const credential=c.credential&&open(key,c.
 async function processOne(){const q=store.db.prepare("SELECT q.*,c.provider,c.credential,c.status AS connection_status,v.recipient_ref FROM commands q JOIN connections c ON c.id=q.connection_id AND c.user_id=q.user_id JOIN conversations v ON v.id=q.conversation_id AND v.user_id=q.user_id WHERE q.status='queued' AND c.provider NOT IN ('line','gmail','messenger') ORDER BY q.created_at LIMIT 1").get();if(!q)return;
  const c=store.connection(q.user_id,q.connection_id);if(c.status!=='active')return;
  if(!allowedConnection(c))return;
- const t='worker-'+q.id;store.db.prepare("UPDATE commands SET status='executing',lease_hash=?,lease_until=? WHERE id=? AND status='queued'").run(hash(t),new Date(Date.now()+30000).toISOString(),q.id);
+ const t='worker-'+q.id;store.db.prepare("UPDATE commands SET status='executing',lease_hash=?,lease_until=? WHERE id=? AND status='queued'").run(hash(t),new Date(Date.now()+6*60000).toISOString(),q.id);
  store.db.prepare('INSERT INTO attempts VALUES(?,?,?,?,?,?,?)').run(randomUUID(),q.user_id,q.id,'executing',null,new Date().toISOString(),null);
- try{const externalMessageId=await providerSend(c,{recipient_ref:q.recipient_ref},open(key,q.body));store.finish(c,q.id,{leaseToken:t,status:'sent',externalMessageId,evidence:'provider_api_success'})}
- catch(e){store.finish(c,q.id,{leaseToken:t,status:'uncertain',errorCode:String(e.message).slice(0,120),evidence:'provider_result_unconfirmed'})}
+ try{const externalMessageId=await providerSend(c,{recipient_ref:q.recipient_ref},open(key,q.body),store.commandAttachments(q));store.finish(c,q.id,{leaseToken:t,status:'sent',externalMessageId,evidence:'provider_api_success'})}
+ catch(e){store.finish(c,q.id,{leaseToken:t,status:e.notDelivered?'failed':'uncertain',errorCode:String(e.message).slice(0,120),evidence:e.notDelivered?'provider_rejected_before_delivery':'provider_result_unconfirmed'})}
 }
 const interval=setInterval(()=>{store.expire();processOne().catch(e=>console.error('worker',e.message))},1500);interval.unref();
 const syncInFlight=new Set();
@@ -180,6 +194,7 @@ async function handle(req,res){const url=new URL(req.url,`http://${req.headers.h
   finally{flow.inFlight=false}
  }
  if(req.method==='GET'&&p==='/api/inbox'){const provider=url.searchParams.get('provider')||'all';const page=store.inboxPage(user.id,url.searchParams.get('filter')||'attention',url.searchParams.get('cursor'),provider,url.searchParams.get('search')||'');return json(res,200,{user,connections:store.connections(user.id),summary:store.inboxSummary(user.id,provider),conversations:page.items,nextCursor:page.nextCursor})}
+ if(req.method==='GET'&&p==='/api/insights')return json(res,200,store.insights(user.id));
  const messagesMatch=p.match(/^\/api\/conversations\/([^/]+)\/messages$/);if(req.method==='GET'&&messagesMatch){const page=store.messagePage(user.id,messagesMatch[1],url.searchParams.get('cursor'));return page?json(res,200,page):fail(res,404,'not_found')}
  if(req.method==='POST'&&p==='/api/connections'){const {data}=await body(req);required(data,'provider','externalAccountId','displayName');if(!['line','slack','chatwork','teams','gmail','messenger'].includes(data.provider))throw Error('invalid_provider');await verifyConnection(data);return json(res,201,store.addConnection(user.id,data))}
  let m=p.match(/^\/api\/connections\/([^/]+)\/reconnect$/);if(req.method==='POST'&&m){const c=store.connection(user.id,m[1]);if(!c||['line','gmail','messenger'].includes(c.provider))return fail(res,404,'not_found');const {data}=await body(req);required(data,'credential');await verifyConnection({provider:c.provider,externalAccountId:c.external_account_id,credential:data.credential,webhookSecret:data.webhookSecret||(c.webhook_secret?open(key,c.webhook_secret):'')});store.updateCredential(user.id,c.id,data.credential,data.webhookSecret);if(c.provider==='teams')store.clearTeamsOauth(user.id,c.id);return json(res,200,{ok:true})}
@@ -187,10 +202,10 @@ async function handle(req,res){const url=new URL(req.url,`http://${req.headers.h
  m=p.match(/^\/api\/connections\/([^/]+)\/sync$/);if(req.method==='POST'&&m){const c=store.connection(user.id,m[1]);if(!c)return fail(res,404,'not_found');if(!['slack','chatwork','teams'].includes(c.provider))return fail(res,400,'sync_not_supported');if(syncInFlight.has(c.id))return json(res,202,{started:false,reason:'already_running'});syncConnection(c).catch(e=>console.error('sync',e.message));return json(res,202,{started:true})}
  m=p.match(/^\/api\/connections\/([^/]+)\/bridge-token$/);if(req.method==='POST'&&m){const t=store.bridgeToken(user.id,m[1]);return t?json(res,200,{token:t}):fail(res,404,'not_found')}
  m=p.match(/^\/api\/conversations\/([^/]+)\/attention$/);if(req.method==='POST'&&m){const {data}=await body(req);return store.attention(user.id,m[1],data.attention)?json(res,200,{ok:true}):fail(res,404,'not_found')}
- if(req.method==='POST'&&p==='/api/replies'){const {data}=await body(req);required(data,'conversationId','requestId','expectedRecipientRef','body');if(data.body.length>20000)throw Error('body_too_large');return json(res,202,store.command(user.id,data))}
+ if(req.method==='POST'&&p==='/api/replies'){const {data}=await body(req,8_600_000);required(data,'conversationId','requestId','expectedRecipientRef','body');if(data.body.length>20000)throw Error('body_too_large');return json(res,202,store.command(user.id,data))}
  return fail(res,404,'not_found')
 }
-const clientErrors=new Set(['recipient_changed','recipient_conflict','idempotency_conflict','connection_inactive','conversation_not_found','pending_command','gmail_agent_offline','body_too_large','credential_verification_failed','account_identity_mismatch','slack_user_token_required','bridge_credentials_not_accepted']);
+const clientErrors=new Set(['recipient_changed','recipient_conflict','idempotency_conflict','connection_inactive','conversation_not_found','pending_command','gmail_agent_offline','body_too_large','credential_verification_failed','account_identity_mismatch','slack_user_token_required','bridge_credentials_not_accepted','attachments_not_supported','too_many_attachments','attachment_too_large','attachments_too_large']);
 const server=http.createServer((req,res)=>handle(req,res).catch(e=>{
  console.error('request',e.message);
  const code=String(e.message),clientError=code.startsWith('invalid_')||clientErrors.has(code);

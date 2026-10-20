@@ -1,12 +1,11 @@
 # 統合受信箱 ER図（実装版）
 
-SQLite の実装スキーマは [`src/store.mjs`](../src/store.mjs) にある。次の図は、実際に作成する11テーブルと関係を示す。
-
-![統合受信箱のER図](er-diagram.png)
+SQLite の実装スキーマは [`src/store.mjs`](../src/store.mjs) にある。次の図は、実際に作成する14テーブルと関係を示す。
 
 ```mermaid
 erDiagram
     USERS ||--o{ CONNECTIONS : owns
+    USERS ||--o{ SESSIONS : logs_in
     CONNECTIONS ||--o{ CONVERSATIONS : contains
     CONVERSATIONS ||--o{ MESSAGES : contains
     CONNECTIONS ||--o{ INBOUND_EVENTS : deduplicates
@@ -16,11 +15,26 @@ erDiagram
     CONNECTIONS ||--o| SYNC_STATE : reconciles
     CONNECTIONS ||--o{ CHATWORK_ROOMS : classifies
     CONNECTIONS ||--o{ TEAMS_SUBSCRIPTIONS : renews
+    CONNECTIONS ||--o| TEAMS_OAUTH : authorizes
 
     USERS {
         text id PK
         text email UK
         text token_hash UK
+        text password_hash
+    }
+    INVITATIONS {
+        text id PK
+        text email
+        text token_hash UK
+        text expires_at
+        text used_at
+    }
+    SESSIONS {
+        text id PK
+        text user_id FK
+        text token_hash UK
+        text expires_at
     }
     CONNECTIONS {
         text id PK
@@ -55,6 +69,7 @@ erDiagram
         text direction
         text body
         text source_at
+        text attachments_meta
     }
     INBOUND_EVENTS {
         text id PK
@@ -72,6 +87,7 @@ erDiagram
         text recipient_snapshot
         text body
         text body_hash
+        text attachments
         text status
         text lease_until
         text error_code
@@ -117,10 +133,18 @@ erDiagram
         text expires_at
         text room_type
     }
+    TEAMS_OAUTH {
+        text connection_id PK,FK
+        text user_id FK
+        text client_id
+        text tenant_id
+        text refresh_token
+        text expires_at
+    }
 ```
 
 - `user_id` と親IDの複合外部キーで、利用者をまたぐ参照をDB上で拒否する。`COMMANDS` は会話と連携先の組合せも複合外部キーで固定する。
-- `CONNECTIONS` の `credential`、`webhook_secret`、`MESSAGES` と `COMMANDS` の `body` は AES-256-GCM 暗号文。ユーザートークン・LINEブリッジ鍵・送信リース鍵はハッシュのみ保持する。
+- `CONNECTIONS` の `credential`、`webhook_secret`、`MESSAGES` と `COMMANDS` の `body`、添付ファイル本体と表示メタデータ、`TEAMS_OAUTH.refresh_token` は AES-256-GCM 暗号文。ユーザートークン・LINEブリッジ鍵・送信リース鍵はハッシュのみ保持する。送信結果が確定またはリース切れになると、`COMMANDS.attachments` を消す。
 - `INBOUND_EVENTS(connection_id,event_key)`、`MESSAGES(conversation_id,external_id)`、`COMMANDS(user_id,request_id)` が再配信・操作再試行の重複を抑える。
 - `COMMANDS.status` は `queued / leased / executing / sent / failed / uncertain`。LINEは `executing` の後、外部画面で確認された時だけ `sent`。リース切れは `uncertain` にし、自動再送しない。
 - LINE・Gmail・Messengerブリッジは `CONNECTIONS.bridge_hash` で1連携に1つの現行鍵を持つ。鍵を再発行すると古い鍵は無効になる。GmailのOAuth更新トークンは本人端末のエージェント設定に置き、このDBには保存しない。

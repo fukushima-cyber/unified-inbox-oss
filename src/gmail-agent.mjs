@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 const GOOGLE='https://gmail.googleapis.com/gmail/v1/users/me';
 const GOOGLE_PATH=new URL(GOOGLE).pathname;
 const TOKEN='https://oauth2.googleapis.com/token';
@@ -32,13 +33,18 @@ export function incomingGmail(message,ownEmail){
  const date=Number(message.internalDate);
  return {eventKey:`gmail:${message.id}`,externalConversationId:message.threadId,recipientRef:recipient,displayName:safeHeader(headers.subject||sender).slice(0,200)||sender,body:messageBody(message),externalMessageId:message.id,senderName:safeHeader(headers.from).slice(0,200),sourceAt:Number.isFinite(date)&&date>0?new Date(date).toISOString():new Date().toISOString()};
 }
-export function replyMime({from,to,subject,messageId,references,body}){
+export function replyMime({from,to,subject,messageId,references,body,attachments=[]}){
  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from)||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to))throw Error('invalid_email_address');
  if(!/^<[^<>\r\n]+>$/.test(messageId)||messageId.length>250)throw Error('missing_message_id');
  const title=safeHeader(subject);
  const refs=String(references||'').match(/<[^<>\r\n]+>/g)?.filter(x=>x.length<=250).slice(-20)||[];
  const encoded=Buffer.from(body,'utf8').toString('base64').replace(/.{1,76}/g,'$&\r\n').trimEnd();
- const lines=[`From: ${from}`,`To: ${to}`,`Subject: ${encodeSubject(/^re:/i.test(title)?title:`Re: ${title}`)}`,`In-Reply-To: ${messageId}`,`References: ${[...refs,messageId].join('\r\n ')}`,'MIME-Version: 1.0','Content-Type: text/plain; charset=UTF-8','Content-Transfer-Encoding: base64','',encoded];
+ const lines=[`From: ${from}`,`To: ${to}`,`Subject: ${encodeSubject(/^re:/i.test(title)?title:`Re: ${title}`)}`,`In-Reply-To: ${messageId}`,`References: ${[...refs,messageId].join('\r\n ')}`,'MIME-Version: 1.0'];
+ if(attachments.length){
+  const boundary=`inbox-${randomUUID()}`;lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`,'',`--${boundary}`,'Content-Type: text/plain; charset=UTF-8','Content-Transfer-Encoding: base64','',encoded);
+  for(const file of attachments){const fallback=file.name.replace(/[^\x20-\x7e]/g,'_').replace(/["\\]/g,'_');const encodedName=encodeURIComponent(file.name).replace(/['()]/g,x=>`%${x.charCodeAt(0).toString(16).toUpperCase()}`);lines.push(`--${boundary}`,`Content-Type: ${file.type}; name="${fallback}"`,'Content-Transfer-Encoding: base64',`Content-Disposition: attachment; filename="${fallback}"; filename*=UTF-8''${encodedName}`,'',file.data.replace(/.{1,76}/g,'$&\r\n').trimEnd())}
+  lines.push(`--${boundary}--`);
+ }else lines.push('Content-Type: text/plain; charset=UTF-8','Content-Transfer-Encoding: base64','',encoded);
  return Buffer.from(lines.join('\r\n'),'utf8').toString('base64url');
 }
 
@@ -116,7 +122,7 @@ export class GmailAgent{
    if(!message)throw Error('gmail_reply_target_missing');
    const h=headersOf(message),recipient=emailOf(h['reply-to']||h.from);
    if(recipient!==command.conversation.recipient_ref.toLowerCase())throw Error('gmail_recipient_changed');
-   const raw=replyMime({from:this.config.email,to:recipient,subject:h.subject,messageId:h['message-id'],references:h.references,body:command.body});
+   const raw=replyMime({from:this.config.email,to:recipient,subject:h.subject,messageId:h['message-id'],references:h.references,body:command.body,attachments:command.attachments||[]});
    const begun=await this.bridge(`commands/${encodeURIComponent(command.id)}/executing`,'POST',{leaseToken:command.leaseToken});
    if(!begun.ok)throw Error('gmail_lease_expired');started=true;
    const sent=await this.google('/messages/send','POST',{threadId,raw});

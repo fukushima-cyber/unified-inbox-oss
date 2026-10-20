@@ -17,7 +17,7 @@
 
 受信箱を別の方法で起動している場合は、本人の端末で `node scripts/gmail-agent.mjs run` を別途実行する。
 
-エージェントが動作中、初回は直近7日間の受信箱を最大500件確認し、以後はGmailの履歴IDから約60秒間隔で新着を照合する。処理件数の上限や履歴ID失効で欠落の可能性がある場合は受信箱へ表示する。メッセージの本文は本人所有の受信箱へ転送される。エージェント停止中は同期も返信も進まない。送信APIの応答が不明な場合は自動再送せず「要確認」にする。添付ファイルとHTML本文の完全な再現は未対応で、プレーンテキストまたはGmailのスニペットを表示する。
+エージェントが動作中、初回は直近7日間の受信箱を最大500件確認し、以後はGmailの履歴IDから約60秒間隔で新着を照合する。処理件数の上限や履歴ID失効で欠落の可能性がある場合は受信箱へ表示する。メッセージの本文は本人所有の受信箱へ転送される。エージェント停止中は同期も返信も進まない。送信APIの応答が不明な場合は自動再送せず「要確認」にする。受信した添付ファイルとHTML本文の完全な再現は未対応で、プレーンテキストまたはGmailのスニペットを表示する。返信には最大3ファイルをMIME形式で添付できる。
 
 Googleはデスクトップアプリで[PKCEを使ったOAuth認可](https://developers.google.com/identity/protocols/oauth2/native-app)を案内している。本文の読み取りに必要な [`gmail.readonly` は制限付きスコープ](https://developers.google.com/workspace/gmail/api/auth/scopes)であり、公開アプリでは審査要件がある。外部ユーザー向けOAuth同意画面を「Testing」にしたプロジェクトでは、[更新トークンが通常7日で失効する](https://developers.google.com/identity/protocols/oauth2)。継続利用には各人のGoogle Cloud設定と審査要件を確認する必要がある。履歴IDが失効した場合は[全件再同期が必要](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list)だが、この検証版の再同期は直近7日間に限る。その間に取りこぼした可能性がある場合は元のGmailで確認する。
 

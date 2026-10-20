@@ -24,15 +24,17 @@ test('one-command local setup starts and preserves the key and DB on rerun',asyn
  const port=await freePort();
  const env={...process.env,PORT:String(port)};
  const start=async()=>{
-  const child=spawn('sh',['setup.sh','person@example.test'],{cwd:dir,env});
+  const child=spawn('sh',['setup.sh'],{cwd:dir,env});
   let output='';
   child.stdout.on('data',chunk=>output+=chunk);
   child.stderr.on('data',chunk=>output+=chunk);
   for(let i=0;i<900;i++){
    if(child.exitCode!==null)throw Error(`setup exited: ${output}`);
    try{
-    if((await fetch(`http://127.0.0.1:${port}/health`)).ok && output.includes('"status":"invited"')){
-     return {child,invite:JSON.parse(output.split('\n').find(line=>line.startsWith('{')&&line.includes('"status":"invited"')))};
+    const response=await fetch(`http://127.0.0.1:${port}/api/inbox`);
+    if(response.ok){
+     const page=await response.json();
+     if(page.authMode==='local')return {child,owner:page.user};
     }
    }catch{}
    await delay(100);
@@ -45,17 +47,21 @@ test('one-command local setup starts and preserves the key and DB on rerun',asyn
   const first=await start();child=first.child;
   const keyPath=join(dir,'secrets/inbox_master_key');
   const key=readFileSync(keyPath,'utf8');
+  assert.equal(first.owner.email,'owner@local.invalid');
+  const initialStore=new Store(join(dir,'inbox.sqlite'),Buffer.from(key.trim(),'hex'));
+  const connection=initialStore.addConnection(first.owner.id,{provider:'line',externalAccountId:'test-line',displayName:'LINE'});
+  initialStore.ingest(initialStore.connection(first.owner.id,connection.id),{eventKey:'one',externalConversationId:'person-one',recipientRef:'stable-one',displayName:'Person One',body:'private'});
+  initialStore.close();
   child.kill('SIGTERM');await once(child,'exit');child=null;
   const second=await start();child=second.child;
   assert.equal(readFileSync(keyPath,'utf8'),key);
-  assert.notEqual(second.invite.token,first.invite.token);
+  assert.equal(second.owner.id,first.owner.id);
   const store=new Store(join(dir,'inbox.sqlite'),Buffer.from(key.trim(),'hex'));
-  assert.equal(store.validInvite(first.invite.token),undefined);
-  assert.equal(store.validInvite(second.invite.token).email,'person@example.test');
+  assert.equal(store.connections(second.owner.id).length,1);
   store.close();
   child.kill('SIGTERM');await once(child,'exit');child=null;
   renameSync(keyPath,join(dir,'secrets/lost-key'));
-  const failed=spawnSync('sh',['setup.sh','person@example.test'],{cwd:dir,env,encoding:'utf8'});
+  const failed=spawnSync('sh',['setup.sh'],{cwd:dir,env,encoding:'utf8'});
   assert.notEqual(failed.status,0);
   assert.match(failed.stderr,/元の鍵を復元/);
  }finally{

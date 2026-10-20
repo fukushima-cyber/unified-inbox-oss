@@ -26,7 +26,7 @@ async function refresh({silent=false}={}){
  try{
   const [page,stats]=await Promise.all([api(inboxPath()),api('/api/insights').catch(()=>null)]);if(sequence!==refreshSequence)return;
   data=page;insights=stats;loadError='';if(oldSelected&&selected&&!page.conversations.some(item=>item.id===selected))data.conversations.push(oldSelected);
-  $('#account').textContent=data.user.email;$('#logout').hidden=false;render();
+  $('#account').textContent=data.authMode==='local'?'':data.user.email;$('#logout').hidden=data.authMode==='local';if(data.authMode==='local'&&$('#loginDialog').open)$('#loginDialog').close();render();
   if(selected)await loadMessages(false);
  }catch(error){if(sequence!==refreshSequence)return;if(error.message==='unauthorized'){$('#logout').hidden=true;if(!$('#loginDialog').open)$('#loginDialog').showModal()}else if(!data){const box=$('#conversationList'),state=element('div','listEmpty');state.append(element('h2','','受信箱を読み込めませんでした'),element('p','',readableError(error.message)));const retry=element('button','secondary','再試行');retry.onclick=()=>refresh();state.append(retry);box.replaceChildren(state)}else{loadError=error.message;renderNavigation();toast(error.message)}}
 }

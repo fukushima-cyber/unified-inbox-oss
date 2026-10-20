@@ -12,18 +12,18 @@
 手元のPCで試す場合はNode.js 22.16以降とOpenSSLが必要。依存パッケージのインストールは不要。Slack・Chatwork・Teamsの定期照合とGmailエージェントには公開ドメインは不要。Webhookの即時通知とGrok BotのRemote HTTPS MCPを使う場合だけ、外部から到達できるHTTPS URLが必要。PCを停止・スリープすると受信・返信処理も止まる。
 
 ```sh
-./setup.sh you@example.com
+./setup.sh
 ```
 
-引数なしの `./setup.sh` でも対話入力できる。コマンドはマスター鍵と所有者を保存して招待コードを発行し、`http://127.0.0.1:8787` でサーバーを起動する。Gmailを設定済みなら同じコマンドで同期エージェントも起動する。終了は Ctrl+C。再実行しても鍵とDBを保持する。初回設定前の招待コードだけは再発行され、古いコードは失効する。パスワード登録済みなら新しいコードを発行しない。
+ローカル起動では `http://127.0.0.1:8787` に直接入れる。ID・パスワード・招待コードは不要。初回は内部用の所有者IDを作り、再起動時は既存の所有者とDBをそのまま使う。Gmailを設定済みなら同じコマンドで同期エージェントも起動する。終了は Ctrl+C。ローカル画面には同じPCのプロセスからアクセスできるため、PC自体のログインと画面ロックで保護する。別の人は自分の端末に別インスタンスを起動する。
 
-本人は表示URLの「招待コードで初回設定」から12文字以上のパスワードを登録し、以後はメールアドレスとパスワードでログインする。ブラウザには有効期限7日のHttpOnlyセッションCookieを使う。別の人は自分の端末・サーバーに別インスタンスを起動する。メール送信とパスワードのセルフリセットは未実装で、再設定には所有者による新しい招待が必要。
+公開ドメインで起動する場合は、従来どおり `./setup.sh you@example.com inbox.example.com` で招待コードを発行し、本人がパスワードを設定する。公開構成には有効期限7日のHttpOnlyセッションCookieを使う。
 
 マスター鍵は `secrets/inbox_master_key`、ローカルDBは `inbox.sqlite` に保存される。両方を保全する。鍵を失うと暗号化した本文・連携資格情報を読めない。既存DBがあるのに鍵がない場合、セットアップは停止する。
 
 公開ドメインとDocker Composeを使う場合は [本人所有サーバーでの起動手順](docs/deployment.md) を参照。`./setup.sh you@example.com inbox.example.com` でHTTPS起動する。ドメインとサーバーは利用者自身が用意する必要がある。
 
-環境変数: `INBOX_DB`（DBパス）、`PORT`（既定8787）、`INBOX_HOST`（既定127.0.0.1）、`INBOX_PUBLIC_ORIGIN`（公開HTTPSのオリジン。Teams通知購読のURLとMCPのOrigin検証に使用）、`INBOX_MAX_MESSAGES_PER_USER`（既定10000）、`INBOX_MAX_EVENTS_PER_USER`（既定20000）、`INBOX_MAX_COMMANDS_PER_USER`（既定10000）。ローカルサーバーはTLSを持たない。外部公開ではHTTPSリバースプロキシが必須で、`INBOX_HOST` をループバック以外にするにはHTTPSの `INBOX_PUBLIC_ORIGIN` が必要。Cookieは公開HTTPS時にSecure属性を付ける。
+環境変数: `INBOX_DB`（DBパス）、`PORT`（既定8787）、`INBOX_HOST`（既定127.0.0.1）、`INBOX_LOCAL_NO_LOGIN=1`（個人用の127.0.0.1起動だけで有効）、`INBOX_PUBLIC_ORIGIN`（公開HTTPSのオリジン。Teams通知購読のURLとMCPのOrigin検証に使用）、`INBOX_MAX_MESSAGES_PER_USER`（既定10000）、`INBOX_MAX_EVENTS_PER_USER`（既定20000）、`INBOX_MAX_COMMANDS_PER_USER`（既定10000）。ローカルサーバーはTLSを持たない。外部公開ではHTTPSリバースプロキシが必須で、`INBOX_HOST` をループバック以外にするにはHTTPSの `INBOX_PUBLIC_ORIGIN` が必要。Cookieは公開HTTPS時にSecure属性を付ける。
 
 ## 連携の作り方
 
@@ -68,7 +68,7 @@ LINEには送信元の冪等キーがない。サーバーはリース期限切�
 
 ## 実装済みの保護
 
-- 招待制の本人別ログイン、scryptで保存したパスワード、有効期限付きHttpOnlyセッション。既存APIトークンは移行用に維持。DBの複合外部キーでも利用者をまたぐ会話・送信参照を拒否。
+- ローカル専用モードはループバックのホスト・接続元・Originを確認し、別サイトからのAPIアクセスを拒否する。公開構成は招待制ログイン、scryptで保存したパスワード、有効期限付きHttpOnlyセッションを使う。既存APIトークンは移行用に維持。DBの複合外部キーでも利用者をまたぐ会話・送信参照を拒否。
 - SlackとChatworkのWebhook署名検証、Teamsの `clientState` 検証。
 - 受信イベント・外部メッセージ・返信要求の重複排除。
 - 送信宛先の固定、LINEの一件リース、送信結果不明時の自動再送停止。

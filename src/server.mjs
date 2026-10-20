@@ -23,6 +23,10 @@ const allowedConnection=c=>Boolean(c)&&(!ownerEmail||store.db.prepare('SELECT em
 const host=process.env.INBOX_HOST||'127.0.0.1',port=Number(process.env.PORT||8787);
 const publicOrigin=process.env.INBOX_PUBLIC_ORIGIN?new URL(process.env.INBOX_PUBLIC_ORIGIN).origin:'';
 if((publicOrigin&&!publicOrigin.startsWith('https://')&&!/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(publicOrigin))||(!['127.0.0.1','localhost','::1'].includes(host)&&!publicOrigin.startsWith('https://')))throw Error('INBOX_PUBLIC_ORIGIN: HTTPS required for public binding');
+const localNoLogin=process.env.INBOX_LOCAL_NO_LOGIN==='1';
+if(localNoLogin&&(host!=='127.0.0.1'||publicOrigin||!ownerEmail))throw Error('INBOX_LOCAL_NO_LOGIN requires a personal 127.0.0.1 instance without a public origin');
+if(localNoLogin&&!store.passwordUser(ownerEmail))store.createUser(ownerEmail);
+const localOwner=localNoLogin?store.passwordUser(ownerEmail):null;
 const secureCookie=publicOrigin.startsWith('https://');
 const dummyPasswordHash=hashPassword('unused-password-for-timing');
 const authAttempts=new Map();let activePasswordWork=0;let globalAuthWindow={count:0,until:0};
@@ -113,10 +117,16 @@ async function refreshOneTeamsOauth(){
 }
 const teamsRefreshInterval=setInterval(()=>refreshOneTeamsOauth().catch(e=>console.error('Teams更新エラー:',e.message)),60000);teamsRefreshInterval.unref();
 async function handle(req,res){const url=new URL(req.url,`http://${req.headers.host||'localhost'}`),p=url.pathname;
+ if(localNoLogin){
+  if(req.headers.host!==`127.0.0.1:${port}`||!['127.0.0.1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress))return fail(res,403,'local_only');
+  if(p.startsWith('/api/')&&req.headers['sec-fetch-site']&&!['same-origin','none'].includes(req.headers['sec-fetch-site']))return fail(res,403,'cross_site_request');
+  if(req.headers.origin&&req.headers.origin!==`http://127.0.0.1:${port}`)return fail(res,403,'bad_origin');
+ }
  if(req.method==='GET'&&p==='/health')return json(res,200,{ok:true});
  if(req.method==='GET'&&p==='/'){const html=await readFile(join(dir,'../public/index.html'));res.writeHead(200,{'content-type':'text/html; charset=utf-8','content-security-policy':"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",'cache-control':'no-store'});return res.end(html)}
  if(req.method==='GET'&&p==='/app.js'){const js=await readFile(join(dir,'../public/app.js'));res.writeHead(200,{'content-type':'text/javascript; charset=utf-8','cache-control':'no-store'});return res.end(js)}
  if(req.method==='GET'&&p==='/style.css'){const css=await readFile(join(dir,'../public/style.css'));res.writeHead(200,{'content-type':'text/css; charset=utf-8','cache-control':'no-store'});return res.end(css)}
+ if(localNoLogin&&p.startsWith('/api/auth/'))return fail(res,404,'not_found');
  if(req.method==='POST'&&p==='/api/auth/activate'){
   if(!sameOrigin(req))return fail(res,403,'bad_origin');if(!jsonInput(req))return fail(res,415,'json_required');
   const {data}=await body(req);if(!authAllowed('activate:'+hash(data.inviteToken??'')))return fail(res,429,'too_many_attempts');
@@ -165,7 +175,7 @@ async function handle(req,res){const url=new URL(req.url,`http://${req.headers.h
   if(m[1]==='chatwork'){if(!same(req.headers['x-chatworkwebhooksignature'],chatworkSignature(secret,raw)))return fail(res,401,'bad_signature');const e=data.webhook_event||{};const room=store.db.prepare('SELECT room_type FROM chatwork_rooms WHERE connection_id=? AND user_id=? AND room_id=?').get(c.id,c.user_id,String(e.room_id));if(['message_created','mention_to_me'].includes(data.webhook_event_type)&&e.message_id&&String(e.account_id||e.from_account_id)!==c.external_account_id&&(data.webhook_event_type==='mention_to_me'||room?.room_type==='direct')){incoming(c,{eventKey:`${e.room_id}:${e.message_id}`,externalConversationId:String(e.room_id),recipientRef:String(e.room_id),displayName:`Room ${e.room_id}`,body:e.body,externalMessageId:String(e.message_id),senderName:String(e.account_id||e.from_account_id),sourceAt:new Date(e.send_time*1000).toISOString()})}return json(res,200,{ok:true})}
   if(m[1]==='teams'){for(const e of data.value||[]){if(!same(e.clientState,secret))return fail(res,401,'bad_client_state');if(e.changeType!=='created')continue;const match=/chats\('([^']+)'\)\/messages\('([^']+)'\)/.exec(e.resource||'');if(!match)continue;const subscription=store.db.prepare('SELECT 1 FROM teams_subscriptions WHERE connection_id=? AND user_id=? AND chat_id=? AND subscription_id=? AND expires_at>?').get(c.id,c.user_id,match[1],e.subscriptionId,new Date().toISOString());if(!subscription)return fail(res,401,'unknown_subscription');const credential=c.credential&&open(key,c.credential);if(!credential)return fail(res,503,'missing_credential');const r=await fetch(`https://graph.microsoft.com/v1.0/chats/${encodeURIComponent(match[1])}/messages/${encodeURIComponent(match[2])}`,{headers:{authorization:`Bearer ${credential}`},signal:AbortSignal.timeout(10000)});if(!r.ok)return fail(res,503,'graph_fetch_failed');const message=await r.json();if(message.from?.user?.id===c.external_account_id)continue;const room=store.db.prepare('SELECT room_type FROM teams_subscriptions WHERE connection_id=? AND chat_id=?').get(c.id,match[1]);if(room?.room_type!=='oneOnOne'&&!message.mentions?.some(x=>x.mentioned?.user?.id===c.external_account_id))continue;incoming(c,{eventKey:`${match[1]}:${match[2]}`,externalConversationId:match[1],recipientRef:match[1],displayName:match[1],body:cleanHtml(message.body?.content),externalMessageId:match[2],senderName:message.from?.user?.displayName||'',sourceAt:message.createdDateTime})}return json(res,202,{ok:true})}
  }
- const bearerUser=store.user(bearer(req)),sessionUser=store.session(readCookie(req,'inbox_session'));const user=bearerUser||sessionUser;if(!allowedUser(user))return fail(res,401,'unauthorized');if(!bearerUser&&req.method!=='GET'&&!sameOrigin(req))return fail(res,403,'bad_origin');
+ const bearerUser=store.user(bearer(req)),sessionUser=store.session(readCookie(req,'inbox_session'));const user=localOwner||bearerUser||sessionUser;if(!allowedUser(user))return fail(res,401,'unauthorized');if(!bearerUser&&req.method!=='GET'&&!sameOrigin(req))return fail(res,403,'bad_origin');
  if(req.method==='POST'&&p==='/api/teams/device/start'){
   if(!jsonInput(req))return fail(res,415,'json_required');
   const {data}=await body(req),config=teamsAppConfig(data.clientId,data.tenantId);
@@ -193,7 +203,7 @@ async function handle(req,res){const url=new URL(req.url,`http://${req.headers.h
   }catch(error){teamsDeviceFlows.delete(teamsDeviceMatch[1]);return json(res,200,{status:'failed',error:String(error.message).slice(0,80)})}
   finally{flow.inFlight=false}
  }
- if(req.method==='GET'&&p==='/api/inbox'){const provider=url.searchParams.get('provider')||'all';const page=store.inboxPage(user.id,url.searchParams.get('filter')||'attention',url.searchParams.get('cursor'),provider,url.searchParams.get('search')||'');return json(res,200,{user,connections:store.connections(user.id),summary:store.inboxSummary(user.id,provider),conversations:page.items,nextCursor:page.nextCursor})}
+ if(req.method==='GET'&&p==='/api/inbox'){const provider=url.searchParams.get('provider')||'all';const page=store.inboxPage(user.id,url.searchParams.get('filter')||'attention',url.searchParams.get('cursor'),provider,url.searchParams.get('search')||'');return json(res,200,{user,authMode:localNoLogin?'local':'password',connections:store.connections(user.id),summary:store.inboxSummary(user.id,provider),conversations:page.items,nextCursor:page.nextCursor})}
  if(req.method==='GET'&&p==='/api/insights')return json(res,200,store.insights(user.id));
  const messagesMatch=p.match(/^\/api\/conversations\/([^/]+)\/messages$/);if(req.method==='GET'&&messagesMatch){const page=store.messagePage(user.id,messagesMatch[1],url.searchParams.get('cursor'));return page?json(res,200,page):fail(res,404,'not_found')}
  if(req.method==='POST'&&p==='/api/connections'){const {data}=await body(req);required(data,'provider','externalAccountId','displayName');if(!['line','slack','chatwork','teams','gmail','messenger'].includes(data.provider))throw Error('invalid_provider');await verifyConnection(data);return json(res,201,store.addConnection(user.id,data))}

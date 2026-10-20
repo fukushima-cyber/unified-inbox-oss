@@ -4,17 +4,15 @@ umask 077
 cd "$(dirname "$0")"
 
 fail() { printf '%s\n' "エラー: $*" >&2; exit 1; }
-usage() { printf '%s\n' '使い方: ./setup.sh [初回利用者のメールアドレス] [公開ドメイン]'; exit 2; }
+usage() { printf '%s\n' '使い方: ./setup.sh [初回利用者のメールアドレス [公開ドメイン]]'; exit 2; }
 [ "$#" -le 2 ] || usage
 
 email=${1:-}
 domain=${2:-}
 if [ -z "$email" ]; then
- [ -t 0 ] || usage
- printf '初回利用者のメールアドレス: '
- IFS= read -r email
- printf '公開ドメイン（手元で試す場合は空欄）: '
- IFS= read -r domain
+ if [ -e secrets/owner_email ]; then email=$(cat secrets/owner_email)
+ else email=owner@local.invalid
+ fi
 fi
 case "$email" in
   *@*.*) ;;
@@ -125,13 +123,13 @@ else
  export INBOX_DB="$(pwd -P)/inbox.sqlite"
  export INBOX_HOST=127.0.0.1
  export INBOX_OWNER_EMAIL=$email
+ export INBOX_LOCAL_NO_LOGIN=1
  unset INBOX_PUBLIC_ORIGIN
  port=${PORT:-8787}
  case "$port" in *[!0-9]*|'') fail 'PORTには1〜65535を指定してください' ;; esac
  [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail 'PORTには1〜65535を指定してください'
  PORT=$port node -e 'const net=require("node:net");const s=net.createServer();s.once("error",()=>process.exit(1));s.listen(Number(process.env.PORT),"127.0.0.1",()=>s.close())' || fail "ポート $port を使用できません"
  printf 'URL: http://127.0.0.1:%s\n' "$port"
- node scripts/setup-invite.mjs "$email"
- printf '%s\n' '受信箱を起動します。Gmail設定があれば同期も自動起動します。終了するには Ctrl+C。'
+ printf '%s\n' '受信箱を起動します。ログインは不要です。Gmail設定があれば同期も自動起動します。終了するには Ctrl+C。'
  exec node scripts/local-run.mjs
 fi

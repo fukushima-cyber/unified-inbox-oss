@@ -20,7 +20,7 @@ form label{display:block;font-size:12px;font-weight:700;margin:12px 0}form input
 .listHeader{padding:27px 21px 20px}
 .conversation{padding:18px 21px 17px}
 .conversationTitleRow{margin-bottom:7px}
-.conversationSender{color:#536b60;font-size:11px;line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:6px}
+.conversationSender{color:#375047;font-size:12px;line-height:1.5;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:6px}
 .conversationPreview{margin:11px 0 9px}
 .detailHead{padding:23px 29px}
 .messages{padding-top:29px;padding-bottom:29px;gap:15px}

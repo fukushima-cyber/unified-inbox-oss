@@ -15,7 +15,8 @@ export async function startTeamsDeviceCode(config,fetcher=fetch){
  const result=await response.json().catch(()=>({}));
  if(!response.ok||!result.device_code||!result.user_code)throw Error(`teams_device_${String(result.error||response.status).slice(0,50)}`);
  const uri=new URL(result.verification_uri||'');
- if(uri.protocol!=='https:'||!['microsoft.com','www.microsoft.com'].includes(uri.hostname)||uri.pathname!=='/devicelogin')throw Error('invalid_teams_verification_url');
+ const validMicrosoftDevicePage=(['microsoft.com','www.microsoft.com'].includes(uri.hostname)&&uri.pathname==='/devicelogin')||(uri.hostname==='login.microsoft.com'&&uri.pathname==='/device');
+ if(uri.protocol!=='https:'||uri.username||uri.password||uri.search||uri.hash||!validMicrosoftDevicePage)throw Error('invalid_teams_verification_url');
  return {deviceCode:result.device_code,userCode:result.user_code,verificationUri:uri.href,expiresAt:Date.now()+Number(result.expires_in||900)*1000,interval:Math.max(5,Number(result.interval||5))};
 }
 

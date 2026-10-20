@@ -11,7 +11,7 @@ test('Teams device authorization validates identity, scopes and local token cust
  const calls=[];
  const fake=async(url,init)=>{
   calls.push({url,init});
-  if(url.endsWith('/devicecode'))return Response.json({device_code:'private-device-code',user_code:'PUBLICCODE',verification_uri:'https://microsoft.com/devicelogin',expires_in:900,interval:5});
+  if(url.endsWith('/devicecode'))return Response.json({device_code:'private-device-code',user_code:'PUBLICCODE',verification_uri:'https://login.microsoft.com/device',expires_in:900,interval:5});
   if(url.endsWith('/token')&&init.body.get('grant_type').includes('device_code'))return Response.json({access_token:'private-access',refresh_token:'private-refresh',expires_in:3600,scope:'User.Read Chat.Read ChatMessage.Send offline_access'});
   if(url.endsWith('/token'))return Response.json({access_token:'next-access',refresh_token:'next-refresh',expires_in:3600});
   if(url.endsWith('/me'))return Response.json({id:'33333333-3333-4333-8333-333333333333',displayName:'Owner'});
@@ -19,6 +19,8 @@ test('Teams device authorization validates identity, scopes and local token cust
  };
  const device=await startTeamsDeviceCode(config,fake);
  assert.equal(device.userCode,'PUBLICCODE');
+ assert.equal(device.verificationUri,'https://login.microsoft.com/device');
+ await assert.rejects(()=>startTeamsDeviceCode(config,async()=>Response.json({device_code:'private-device-code',user_code:'PUBLICCODE',verification_uri:'https://login.microsoft.com.evil.test/device'})),/invalid_teams_verification_url/);
  const token=await pollTeamsDeviceCode(config,device.deviceCode,fake);
  assert.equal(token.status,'connected');
  const profile=await teamsProfile(token.accessToken,fake);
